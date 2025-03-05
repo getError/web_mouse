@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>手机触控板</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #touchpad { 
+            width: 100vw; 
+            height: 100vh; 
+            background: #f0f0f0;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+    <div style="position: fixed; top: 20px; left: 20px; z-index: 1000; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1)">
+        <input type="text" id="serverAddress" placeholder="ws://IP:端口" style="padding: 8px; width: 200px; margin-right: 10px;" value="localhost:6789">
+        <button id="connectBtn" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer">连接</button>
+        <div id="status" style="margin-top: 8px; color: #666; font-size: 14px">未连接</div>
+    </div>
+    <div id="touchpad"></div>
+    
+    <script>
+        let ws = null;
+        const statusElement = document.getElementById('status');
+        const addressInput = document.getElementById('serverAddress');
+        const connectBtn = document.getElementById('connectBtn');
+    
+        function updateStatus(isConnected) {
+            statusElement.textContent = isConnected ? '已连接' : '未连接';
+            statusElement.style.color = isConnected ? '#28a745' : '#dc3545';
+            connectBtn.textContent = isConnected ? '断开' : '连接';
+            connectBtn.style.backgroundColor = isConnected ? '#dc3545' : '#007bff';
+            addressInput.disabled = isConnected;
+        }
+    
+        connectBtn.addEventListener('click', () => {
+            if (ws) {
+                ws.close();
+                ws = null;
+                updateStatus(false);
+                return;
+            }
+    
+            let address = addressInput.value.trim();
+            if (!address.startsWith('ws://')) {
+                address = 'ws://' + address;
+            }
+            if (!address.includes(':')) {
+                address += ':6789';
+            }
+    
+            try {
+                ws = new WebSocket(address);
+                updateStatus(false);
+                statusElement.textContent = '连接中...';
+    
+                ws.onopen = () => {
+                    console.log(JSON.stringify({
+                        timestamp: Date.now(),
+                        type: 'websocket_open',
+                        address: address
+                    }));
+                    updateStatus(true);
+                    setupTouchEvents();
+                };
+    
+                ws.onclose = () => {
+                    console.log(JSON.stringify({
+                        timestamp: Date.now(),
+                        type: 'websocket_close'
+                    }));
+                    ws = null;
+                    updateStatus(false);
+                };
+    
+                ws.onerror = (error) => {
+                    console.log(JSON.stringify({
+                        timestamp: Date.now(),
+                        type: 'websocket_error',
+                        error: error.message
+                    }));
+                    console.error('连接错误:', error);
+                    statusElement.textContent = '连接失败';
+                    ws = null;
+                    updateStatus(false);
+                };
+    
+            } catch (error) {
+                console.error('无效地址:', error);
+                statusElement.textContent = '地址格式错误';
+                updateStatus(false);
+            }
+        });
+    
+        function setupTouchEvents() {
+            let lastSentTouch = null;
+            let lastSentTime = 0;
+            let touchStartTime = 0;
+            let lastTouch = null;
+    
+            document.getElementById('touchpad').addEventListener('touchstart', e => {
+                console.log(JSON.stringify({
+                    timestamp: Date.now(),
+                    type: 'touch_start',
+                    x: e.touches[0].clientX,
+                    y: e.touches[0].clientY
+                }));
+                touchStartTime = Date.now();
+                lastTouch = e.touches[0];
+                e.preventDefault();
+            }, false);
+    
+            document.getElementById('touchpad').addEventListener('touchmove', e => {
+                const touch = e.touches[0];
+                const rect = e.target.getBoundingClientRect();
+                
+                // 计算相对坐标
+                const x = (touch.clientX - lastTouch.clientX) / rect.width;
+                const y = (touch.clientY - lastTouch.clientY) / rect.height;
+    
+                const now = Date.now();
+                const minDistance = 5; // 降低移动阈值到2像素
+                const minInterval = 30; // 缩短发送间隔到30毫秒
+    
+                if ((now - (lastSentTime || 0)) > minInterval) {
+                    // 直接发送不再使用requestAnimationFrame
+                    console.log(JSON.stringify({
+                        timestamp: Date.now(),
+                        type: 'send_move',
+                        x: x,
+                        y: y
+                    }));
+                    ws.send(JSON.stringify({
+                        type: 'move',
+                        x: x,
+                        y: y
+                    }));
+                    lastSentTouch = touch;
+                    lastSentTime = now;
+                } else {
+                    console.log(JSON.stringify({
+                        timestamp: Date.now(),
+                        type:'skip_move',
+                        x: x,
+                        y: y
+                    }));
+                }
+
+                e.preventDefault();
+            }, false);
+    
+            document.getElementById('touchpad').addEventListener('touchend', e => {
+                const duration = Date.now() - touchStartTime;
+                // 轻触触发左键，长按邮件
+                const button = duration > 1000 ? 1 : 0;
+                const touch = e.changedTouches[0]
+                const rect = e.target.getBoundingClientRect();
+                const x = (touch.clientX - lastTouch.clientX) / rect.width;
+                const y = (touch.clientY - lastTouch.clientY) / rect.height;
+                if(lastTouch && Math.abs(x) < 0.05 && Math.abs(y) < 0.05 && ws) {
+                    console.log(JSON.stringify({
+                        timestamp: Date.now(),
+                        type: 'send_click',
+                        button: button
+                    }));
+                    ws.send(JSON.stringify({
+                        type: 'click',
+                        button: button,
+                        timestamp: Date.now()
+                    }));
+                }
+                
+                lastTouch = null;
+                e.preventDefault();
+            }, false);
+            window.onload = () => {
+                const ipInfo = document.createElement('div');
+                ipInfo.style.position = 'absolute';
+                ipInfo.style.top = '10px';
+                ipInfo.style.left = '10px';
+                ipInfo.textContent = '请将地址中的{PC_IP}替换为电脑的局域网IP';
+                document.body.appendChild(ipInfo);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -27,7 +27,10 @@
         const statusElement = document.getElementById('status');
         const addressInput = document.getElementById('serverAddress');
         const connectBtn = document.getElementById('connectBtn');
-    
+        // 将变量的值赋给输入框的 value 属性
+        addressInput.value = window.location.hostname+":6789";
+        const LEFT = 0
+        const RIGHT = 1
         function updateStatus(isConnected) {
             statusElement.textContent = isConnected ? '已连接' : '未连接';
             statusElement.style.color = isConnected ? '#28a745' : '#dc3545';
@@ -108,8 +111,28 @@
                     x: e.touches[0].clientX,
                     y: e.touches[0].clientY
                 }));
+                const touch = e.changedTouches[0]
+                if(!lastTouch){
+                    lastTouch = touch
+                }
+                const rect = e.target.getBoundingClientRect();
+                const x = (touch.clientX - lastTouch.clientX) / rect.width;
+                const y = (touch.clientY - lastTouch.clientY) / rect.height;
+                if(lastTouch && Math.abs(x) < 0.05 && Math.abs(y) < 0.05 && ws) {
+                    console.log(JSON.stringify({
+                        timestamp: Date.now(),
+                        type: 'send_click',
+                        button: "LEFT"
+                    }));
+                    ws.send(JSON.stringify({
+                        type: 'click',
+                        button: LEFT,
+                        timestamp: Date.now()
+                    }));
+                }
                 touchStartTime = Date.now();
                 lastTouch = e.touches[0];
+                lastSentTouch = lastTouch
                 e.preventDefault();
             }, false);
     
@@ -118,12 +141,12 @@
                 const rect = e.target.getBoundingClientRect();
                 
                 // 计算相对坐标
-                const x = (touch.clientX - lastTouch.clientX) / rect.width;
-                const y = (touch.clientY - lastTouch.clientY) / rect.height;
+                const x = (touch.clientX - lastSentTouch.clientX) / Math.min(rect.width,rect.height);
+                const y = (touch.clientY - lastSentTouch.clientY) / Math.min(rect.width,rect.height);
     
                 const now = Date.now();
                 const minDistance = 5; // 降低移动阈值到2像素
-                const minInterval = 30; // 缩短发送间隔到30毫秒
+                const minInterval = 20; // 缩短发送间隔到30毫秒
     
                 if ((now - (lastSentTime || 0)) > minInterval) {
                     // 直接发送不再使用requestAnimationFrame
@@ -154,21 +177,19 @@
     
             document.getElementById('touchpad').addEventListener('touchend', e => {
                 const duration = Date.now() - touchStartTime;
-                // 轻触触发左键，长按邮件
-                const button = duration > 1000 ? 1 : 0;
                 const touch = e.changedTouches[0]
                 const rect = e.target.getBoundingClientRect();
                 const x = (touch.clientX - lastTouch.clientX) / rect.width;
                 const y = (touch.clientY - lastTouch.clientY) / rect.height;
-                if(lastTouch && Math.abs(x) < 0.05 && Math.abs(y) < 0.05 && ws) {
+                if(lastTouch && Math.abs(x) < 0.05 && Math.abs(y) < 0.05 && duration > 1000  && ws) {
                     console.log(JSON.stringify({
                         timestamp: Date.now(),
                         type: 'send_click',
-                        button: button
+                        button: "RIGHT"
                     }));
                     ws.send(JSON.stringify({
                         type: 'click',
-                        button: button,
+                        button: RIGHT,
                         timestamp: Date.now()
                     }));
                 }
